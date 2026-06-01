@@ -12,7 +12,7 @@ st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial
 # ==========================================
 # 2. CARGA Y LIMPIEZA DE DATOS (NUBE)
 # ==========================================
-@st.cache_data(ttl=60) # Actualiza el catálogo automáticamente cada 60 segundos
+@st.cache_data(ttl=60)
 def cargar_base_maestra():
     url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
     df = pd.read_csv(url_catalogo, dtype=str)
@@ -27,16 +27,13 @@ def cargar_guias():
         df = pd.read_csv(url_guias)
         df.columns = df.columns.str.strip().str.upper()
         
-        # LIMPIEZA PROFUNDA
         df = df.replace(r'^\s*$', np.nan, regex=True)
-        
         columnas_guia = [c for c in df.columns if c != 'SKU']
         df[columnas_guia] = df[columnas_guia].ffill()
         df = df.dropna(subset=['SKU'])
         
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
-            
         return df
     except Exception:
         return pd.DataFrame()
@@ -47,8 +44,24 @@ except Exception as e:
     st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
     st.stop()
 
-# Llama a la función de la nube sin pedir archivo local
-df_guias = cargar_guias()
+df_guias = cargar_guias() 
+
+# ==========================================
+# MOTOR DE BÚSQUEDA DE IMÁGENES (ANTI-LINUX)
+# ==========================================
+def obtener_ruta_imagen(nombre_imagen):
+    carpeta = "IMAGENES_VMINGO_PDF"
+    if not pd.notna(nombre_imagen) or str(nombre_imagen).strip() == "":
+        return None
+    
+    nombre_limpio = str(nombre_imagen).strip().lower()
+    
+    if os.path.exists(carpeta):
+        for archivo in os.listdir(carpeta):
+            # Compara ignorando mayúsculas y minúsculas
+            if archivo.lower() == nombre_limpio:
+                return os.path.join(carpeta, archivo)
+    return None
 
 # ==========================================
 # 3. VARIABLES DE ESTADO
@@ -71,12 +84,10 @@ def procesar_camara():
 # ==========================================
 # 4. INTERFAZ DE ENTRADA (PESTAÑAS)
 # ==========================================
-tab_pistola, tab_camara = st.tabs(["🔫 Escáner de Pistola (PC)", "📸 Cámara de Celular (Móvil)"])
+tab_pistola, tab_camara = st.tabs(["🔫 Escáner de Pistola (PC)", "📸 Cámara Automática (Móvil)"])
 
 with tab_pistola:
     st.text_input("ESCANEE LA ETIQUETA AQUÍ:", key="temp_pistola", on_change=procesar_pistola, placeholder="Dispare el láser sobre el código...")
-    
-    # Autofocus fantasma para la pistola
     components.html(
         """
         <script>
@@ -90,9 +101,9 @@ with tab_pistola:
     )
 
 with tab_camara:
-    st.info("💡 Apunte la cámara trasera del celular hacia el código de barras.")
+    st.info("💡 La cámara trasera se activará automáticamente.")
     
-    # Módulo de cámara HTML5
+    # Módulo de cámara HTML5 FORZADO a la cámara trasera
     components.html(
         """
         <div id="reader" style="width:100%; max-width:450px; margin:0 auto; border-radius:10px; overflow:hidden;"></div>
@@ -101,21 +112,26 @@ with tab_camara:
         function onScanSuccess(decodedText, decodedResult) {
             const doc = window.parent.document;
             const inputs = doc.querySelectorAll('input');
-            // Buscamos el segundo input (el de la cámara)
             if(inputs.length > 1) {
                 inputs[1].value = decodedText;
                 inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
             }
         }
-        let config = { fps: 10, qrbox: {width: 250, height: 150} };
-        let html5QrcodeScanner = new Html5QrcodeScanner("reader", config, false);
-        html5QrcodeScanner.render(onScanSuccess);
+        
+        const html5QrCode = new Html5Qrcode("reader");
+        const config = { fps: 10, qrbox: {width: 250, height: 150} };
+        
+        // Inicia directamente pidiendo la cámara trasera (environment)
+        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+        .catch(err => {
+            console.log("Error al iniciar cámara: ", err);
+        });
         </script>
         """, height=350
     )
     
-    # Input invisible que recibe el texto de la cámara
-    st.text_input("Código capturado por cámara:", key="temp_camara", on_change=procesar_camara, label_visibility="collapsed")
+    # Barra de texto visible debajo de la cámara
+    st.text_input("✏️ O escriba el código manualmente aquí:", key="temp_camara", on_change=procesar_camara, placeholder="Escriba y presione Enter...")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
@@ -128,20 +144,17 @@ if codigo:
     skus_encontrados = []
     tienda_origen = "Desconocida"
     
-    # A) Búsqueda en Guías Diarias
     if not df_guias.empty:
         columnas_guia = [c for c in df_guias.columns if c != 'SKU']
         for col in columnas_guia:
             coincidencia = df_guias[df_guias[col].str.contains(codigo, na=False, regex=False)]
             if not coincidencia.empty:
                 if 'SKU' in df_guias.columns:
-                    # Trae TODOS los SKUs permitiendo piezas múltiples idénticas (Para Shein/Temu)
                     skus_brutos = coincidencia['SKU'].astype(str).str.strip().str.upper().tolist()
                     skus_encontrados = [s for s in skus_brutos if s not in ["NAN", "NONE", ""]]
                     tienda_origen = "Guía Logística Diaria"
                     break
 
-    # B) Búsqueda en Catálogo Maestro
     if not skus_encontrados:
         match_meli = df_maestro[df_maestro['Codigo MELI'] == codigo]
         if not match_meli.empty:
@@ -185,14 +198,16 @@ if codigo:
                 msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ SIN CAJA (Mandar en Bolsa/Playo)"
                 msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta Nano"
 
-                if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "":
-                    ruta_img = os.path.join("IMAGENES_VMINGO_PDF", str(imagen_nombre))
-                    if os.path.exists(ruta_img):
-                        col_espacio1, col_img, col_espacio2 = st.columns([1, 4, 1])
-                        with col_img:
-                            st.image(ruta_img, use_container_width=True)
-                    else:
-                        st.warning(f"📸 Foto no encontrada: {ruta_img}")
+                # Usamos el nuevo motor de búsqueda de imágenes
+                ruta_img = obtener_ruta_imagen(imagen_nombre)
+
+                if ruta_img:
+                    col_espacio1, col_img, col_espacio2 = st.columns([1, 4, 1])
+                    with col_img:
+                        st.image(ruta_img, use_container_width=True)
+                else:
+                    if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "":
+                        st.warning(f"📸 Foto no encontrada en la nube: {imagen_nombre}")
                 
                 st.markdown(f"<h1 style='text-align: center; margin-bottom: 0px; font-size: 2.5rem;'>{titulo}</h1>", unsafe_allow_html=True)
                 
@@ -224,12 +239,10 @@ if codigo:
 # 7. CENTRO DE AYUDA
 # ==========================================
 st.markdown("<br><br>", unsafe_allow_html=True)
-with st.expander("❓ ¿El sistema no reconoce una guía? Centro de Ayuda"):
+with st.expander("❓ ¿El sistema no reconoce una guía o marca error?"):
     st.markdown("""
-    ### 🛠️ Guía rápida para resolver problemas en piso:
-    
-    1. **La pantalla de la PC no enfoca sola:** Haz un clic en la barra que dice 'ESCANEE LA ETIQUETA AQUÍ' para reactivar el láser.
-    2. **El sistema marca que no encontró nada:** Revisa si guardaste el archivo `Guias_del_dia.xlsx` tras pegar los datos nuevos. Recuerda recargar la página presionando `R`.
-    3. **Aparece un SKU inexistente en rojo:** Significa que la guía se leyó bien, pero ese código de producto es nuevo y falta darlo de alta en tu base maestra (`Catalogo para escaner.xlsx`).
-    4. **El celular no abre la cámara:** Revisa los permisos de tu navegador web móvil y asegúrate de haberle dado en "Permitir" al uso de video.
+    ### 🛠️ Guía rápida:
+    1. **No encuentra el producto:** Revisa que hayas pegado las guías de hoy en el Google Sheets.
+    2. **Aparece un SKU inexistente:** El código de barras se leyó, pero falta dar de alta el producto en la pestaña 'Catalogo' de Google Sheets.
+    3. **El celular no abre la cámara:** Revisa los permisos de Chrome/Safari y asegúrate de darle a "Permitir" uso de cámara.
     """)
