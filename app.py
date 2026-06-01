@@ -10,45 +10,45 @@ import os
 st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial_sidebar_state="collapsed")
 
 # ==========================================
-# 2. CARGA Y LIMPIEZA DE DATOS
+# 2. CARGA Y LIMPIEZA DE DATOS (NUBE)
 # ==========================================
-@st.cache_data
+@st.cache_data(ttl=60) # Actualiza el catálogo automáticamente cada 60 segundos
 def cargar_base_maestra():
-    df = pd.read_excel("Catalogo para escaner.xlsx", sheet_name="Hoja1", dtype=str)
+    url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
+    df = pd.read_csv(url_catalogo, dtype=str)
     for col in ['SKU', 'Codigo MELI', 'FNSKU']:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
     return df
 
-def cargar_guias(ruta_archivo):
-    if os.path.exists(ruta_archivo):
-        df = pd.read_excel(ruta_archivo)
+def cargar_guias():
+    url_guias = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=0"
+    try:
+        df = pd.read_csv(url_guias)
         df.columns = df.columns.str.strip().str.upper()
         
-        # LIMPIEZA PROFUNDA: Convierte espacios invisibles o textos vacíos en Nulos reales (Vital para Mercado Libre)
+        # LIMPIEZA PROFUNDA
         df = df.replace(r'^\s*$', np.nan, regex=True)
         
-        # MAGIA DE RELLENO: Conecta los pedidos "hijos" con su guía "padre" hacia abajo
         columnas_guia = [c for c in df.columns if c != 'SKU']
         df[columnas_guia] = df[columnas_guia].ffill()
-        
-        # Limpieza final: Si la fila original de la guía no tenía SKU, se borra de la memoria
         df = df.dropna(subset=['SKU'])
         
-        # Convertimos a texto para búsquedas exactas
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
             
         return df
-    return pd.DataFrame()
+    except Exception:
+        return pd.DataFrame()
 
 try:
     df_maestro = cargar_base_maestra()
 except Exception as e:
-    st.error(f"⚠️ Error al cargar 'Catalogo para escaner.xlsx': {e}")
+    st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
     st.stop()
 
-df_guias = cargar_guias("Guias_del_dia.xlsx") 
+# Llama a la función de la nube sin pedir archivo local
+df_guias = cargar_guias()
 
 # ==========================================
 # 3. VARIABLES DE ESTADO
