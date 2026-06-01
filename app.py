@@ -10,40 +10,42 @@ import os
 st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial_sidebar_state="collapsed")
 
 # ==========================================
-# 2. CARGA Y LIMPIEZA DE DATOS (NUBE)
+# 2. CARGA Y LIMPIEZA DE DATOS (NUBE BLINDADA)
 # ==========================================
 @st.cache_data(ttl=60)
 def cargar_base_maestra():
     url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
-    # Forzamos a que lea el catálogo estrictamente como texto
     df = pd.read_csv(url_catalogo, dtype=str)
+    
+    # Destruye el caracter fantasma BOM de Google Sheets
+    df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
     
     for col in df.columns:
         df[col] = df[col].astype(str).str.strip().str.upper()
-        # Barredora: Destruye los decimales (.0) en los números largos de MELI
-        df[col] = df[col].apply(lambda x: x[:-2] if str(x).endswith('.0') else x)
+        # Destructor seguro de decimales (.0)
+        df[col] = df[col].apply(lambda x: x[:-2] if x.endswith('.0') else x)
         
     return df
 
 def cargar_guias():
     url_guias = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=0"
     try:
-        # FIX CLAVE: dtype=str para que las guías no se deformen
         df = pd.read_csv(url_guias, dtype=str)
-        df.columns = df.columns.str.strip().str.upper()
+        df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
         
-        # Limpieza ultra agresiva para recuperar los pedidos combinados
+        # Destruye celdas vacías y la palabra literal 'nan' que arruina el arrastre
         df = df.replace(r'^\s*$', np.nan, regex=True)
-        df = df.replace(['NAN', 'NONE', 'NULL', ''], np.nan)
+        df = df.replace(['NAN', 'NONE', 'NULL', 'nan', 'NaN'], np.nan)
         
         columnas_guia = [c for c in df.columns if c != 'SKU']
-        df[columnas_guia] = df[columnas_guia].ffill()
+        if columnas_guia:
+            df[columnas_guia] = df[columnas_guia].ffill()
+            
         df = df.dropna(subset=['SKU'])
         
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
-            # Barredora para las guías logísticas
-            df[col] = df[col].apply(lambda x: x[:-2] if str(x).endswith('.0') else x)
+            df[col] = df[col].apply(lambda x: x[:-2] if x.endswith('.0') else x)
             
         return df
     except Exception:
@@ -55,30 +57,26 @@ except Exception as e:
     st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
     st.stop()
 
-df_guias = cargar_guias()
+df_guias = cargar_guias() 
 
 # ==========================================
-# MOTOR DE BÚSQUEDA DE IMÁGENES (ANTI-LINUX Y RAÍZ)
+# MOTOR DE INVENTARIO DE IMÁGENES (SÚPER RÁPIDO)
 # ==========================================
-def obtener_ruta_imagen(nombre_imagen):
-    if not pd.notna(nombre_imagen) or str(nombre_imagen).strip() == "":
-        return None
+@st.cache_data
+def cargar_inventario_imagenes():
+    inventario = {}
+    # Busca tanto en la raíz de GitHub como en la carpeta
+    rutas_a_escanear = ['.', 'IMAGENES_VMINGO_PDF']
     
-    nombre_limpio = str(nombre_imagen).strip().lower()
-    
-    # 1. Buscar directamente en la raíz (ya que se subieron sueltas en GitHub)
-    if os.path.exists('.'):
-        for archivo in os.listdir('.'):
-            if archivo.lower() == nombre_limpio:
-                return archivo
-                
-    # 2. Buscar en la carpeta por si alguna sí entró ahí
-    carpeta = "IMAGENES_VMINGO_PDF"
-    if os.path.exists(carpeta):
-        for archivo in os.listdir(carpeta):
-            if archivo.lower() == nombre_limpio:
-                return os.path.join(carpeta, archivo)
-    return None
+    for raiz in rutas_a_escanear:
+        if os.path.exists(raiz):
+            for arch in os.listdir(raiz):
+                if arch.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    ruta_completa = arch if raiz == '.' else os.path.join(raiz, arch)
+                    inventario[arch.lower()] = ruta_completa
+    return inventario
+
+inventario_imagenes = cargar_inventario_imagenes()
 
 # ==========================================
 # 3. VARIABLES DE ESTADO
@@ -120,7 +118,6 @@ with tab_pistola:
 with tab_camara:
     st.info("💡 La cámara trasera se activará automáticamente.")
     
-    # Módulo de cámara HTML5 FORZADO (Con Hack para React/Streamlit)
     components.html(
         """
         <div id="reader" style="width:100%; max-width:450px; margin:0 auto; border-radius:10px; overflow:hidden;"></div>
@@ -131,7 +128,6 @@ with tab_camara:
             const inputs = doc.querySelectorAll('input');
             let targetInput = null;
             
-            // Buscamos la caja de texto exacta por su fondo
             for (let i = 0; i < inputs.length; i++) {
                 if (inputs[i].placeholder === "Escriba y presione Enter...") {
                     targetInput = inputs[i];
@@ -140,15 +136,12 @@ with tab_camara:
             }
             
             if(targetInput) {
-                // Truco maestro para obligar a React a leer el código
                 let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                 nativeInputValueSetter.call(targetInput, decodedText);
                 
-                // Detonamos el Enter automático
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                 targetInput.dispatchEvent(new Event('change', { bubbles: true }));
                 
-                // Pausar el escáner 3 segundos para no escanear lo mismo 20 veces
                 if (html5QrCode.getState() === 2) {
                     html5QrCode.pause(true);
                     setTimeout(() => html5QrCode.resume(), 3000);
@@ -192,7 +185,7 @@ if codigo:
                     break
 
     if not skus_encontrados:
-        match_meli = df_maestro[df_maestro['Codigo MELI'] == codigo]
+        match_meli = df_maestro[df_maestro['CODIGO MELI'] == codigo] if 'CODIGO MELI' in df_maestro.columns else df_maestro[df_maestro.get('CODIGO MELI', pd.Series(dtype=str)) == codigo]
         if not match_meli.empty:
             skus_encontrados.append(match_meli.iloc[0]['SKU'])
             tienda_origen = "Mercado Libre (Catálogo Directo)"
@@ -204,10 +197,11 @@ if codigo:
                     tienda_origen = "Amazon (FNSKU)"
             
             if not skus_encontrados:
-                match_sku = df_maestro[df_maestro['SKU'] == codigo]
-                if not match_sku.empty:
-                    skus_encontrados.append(codigo)
-                    tienda_origen = "Búsqueda Directa por SKU"
+                if 'SKU' in df_maestro.columns:
+                    match_sku = df_maestro[df_maestro['SKU'] == codigo]
+                    if not match_sku.empty:
+                        skus_encontrados.append(codigo)
+                        tienda_origen = "Búsqueda Directa por SKU"
 
     # ==========================================
     # 6. RENDERIZADO VISUAL DE PRODUCTOS
@@ -223,26 +217,30 @@ if codigo:
             fila_producto = df_maestro[df_maestro['SKU'] == sku_encontrado]
             
             if not fila_producto.empty:
-                titulo = fila_producto.iloc[0]['Titulo']
-                variante = fila_producto.iloc[0]['Variante'] if 'Variante' in fila_producto.columns else "-"
-                nombre_chino = fila_producto.iloc[0]['Nombre Chino'] if 'Nombre Chino' in fila_producto.columns else "-"
+                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto"
+                variante = fila_producto.iloc[0]['VARIANTE'] if 'VARIANTE' in fila_producto.columns else "-"
+                nombre_chino = fila_producto.iloc[0]['NOMBRE CHINO'] if 'NOMBRE CHINO' in fila_producto.columns else "-"
                 
-                caja = fila_producto.iloc[0]['Caja'] if 'Caja' in fila_producto.columns else "0"
-                cinta = fila_producto.iloc[0]['Cinta Nano'] if 'Cinta Nano' in fila_producto.columns else "0"
-                imagen_nombre = fila_producto.iloc[0]['Imagen'] if 'Imagen' in fila_producto.columns else None
+                caja = fila_producto.iloc[0]['CAJA'] if 'CAJA' in fila_producto.columns else "0"
+                cinta = fila_producto.iloc[0]['CINTA NANO'] if 'CINTA NANO' in fila_producto.columns else "0"
+                imagen_nombre = fila_producto.iloc[0]['IMAGEN'] if 'IMAGEN' in fila_producto.columns else None
                 
                 msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ SIN CAJA (Mandar en Bolsa/Playo)"
                 msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta Nano"
 
-                ruta_img = obtener_ruta_imagen(imagen_nombre)
+                # Extracción instantánea desde el inventario maestro
+                ruta_img = None
+                if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
+                    clave_busqueda = str(imagen_nombre).strip().lower()
+                    ruta_img = inventario_imagenes.get(clave_busqueda)
 
                 if ruta_img:
                     col_espacio1, col_img, col_espacio2 = st.columns([1, 4, 1])
                     with col_img:
                         st.image(ruta_img, use_container_width=True)
                 else:
-                    if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "":
-                        st.warning(f"📸 Foto no encontrada en la nube: {imagen_nombre}")
+                    if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
+                        st.warning(f"📸 Foto no encontrada en el servidor: {imagen_nombre}")
                 
                 st.markdown(f"<h1 style='text-align: center; margin-bottom: 0px; font-size: 2.5rem;'>{titulo}</h1>", unsafe_allow_html=True)
                 
@@ -269,15 +267,3 @@ if codigo:
                 st.error(f"❌ La guía mapeó al SKU `{sku_encontrado}`, pero ese SKU no existe en tu Excel maestro.")
     else:
         st.warning(f"No se reconoció el código `{codigo}`. Revise el lector.")
-
-# ==========================================
-# 7. CENTRO DE AYUDA
-# ==========================================
-st.markdown("<br><br>", unsafe_allow_html=True)
-with st.expander("❓ ¿El sistema no reconoce una guía o marca error?"):
-    st.markdown("""
-    ### 🛠️ Guía rápida:
-    1. **No encuentra el producto:** Revisa que hayas pegado las guías de hoy en el Google Sheets.
-    2. **Aparece un SKU inexistente:** El código de barras se leyó, pero falta dar de alta el producto en la pestaña 'Catalogo' de Google Sheets.
-    3. **El celular no abre la cámara:** Revisa los permisos de Chrome/Safari y asegúrate de darle a "Permitir" uso de cámara.
-    """)
