@@ -15,25 +15,36 @@ st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial
 @st.cache_data(ttl=60)
 def cargar_base_maestra():
     url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
+    # Forzamos a que lea el catálogo estrictamente como texto
     df = pd.read_csv(url_catalogo, dtype=str)
-    for col in ['SKU', 'Codigo MELI', 'FNSKU']:
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip().str.upper()
+    
+    for col in df.columns:
+        df[col] = df[col].astype(str).str.strip().str.upper()
+        # Barredora: Destruye los decimales (.0) en los números largos de MELI
+        df[col] = df[col].apply(lambda x: x[:-2] if str(x).endswith('.0') else x)
+        
     return df
 
 def cargar_guias():
     url_guias = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=0"
     try:
-        df = pd.read_csv(url_guias)
+        # FIX CLAVE: dtype=str para que las guías no se deformen
+        df = pd.read_csv(url_guias, dtype=str)
         df.columns = df.columns.str.strip().str.upper()
         
+        # Limpieza ultra agresiva para recuperar los pedidos combinados
         df = df.replace(r'^\s*$', np.nan, regex=True)
+        df = df.replace(['NAN', 'NONE', 'NULL', ''], np.nan)
+        
         columnas_guia = [c for c in df.columns if c != 'SKU']
         df[columnas_guia] = df[columnas_guia].ffill()
         df = df.dropna(subset=['SKU'])
         
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
+            # Barredora para las guías logísticas
+            df[col] = df[col].apply(lambda x: x[:-2] if str(x).endswith('.0') else x)
+            
         return df
     except Exception:
         return pd.DataFrame()
@@ -44,7 +55,7 @@ except Exception as e:
     st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
     st.stop()
 
-df_guias = cargar_guias() 
+df_guias = cargar_guias()
 
 # ==========================================
 # MOTOR DE BÚSQUEDA DE IMÁGENES (ANTI-LINUX Y RAÍZ)
