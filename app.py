@@ -47,18 +47,24 @@ except Exception as e:
 df_guias = cargar_guias() 
 
 # ==========================================
-# MOTOR DE BÚSQUEDA DE IMÁGENES (ANTI-LINUX)
+# MOTOR DE BÚSQUEDA DE IMÁGENES (ANTI-LINUX Y RAÍZ)
 # ==========================================
 def obtener_ruta_imagen(nombre_imagen):
-    carpeta = "IMAGENES_VMINGO_PDF"
     if not pd.notna(nombre_imagen) or str(nombre_imagen).strip() == "":
         return None
     
     nombre_limpio = str(nombre_imagen).strip().lower()
     
+    # 1. Buscar directamente en la raíz (ya que se subieron sueltas en GitHub)
+    if os.path.exists('.'):
+        for archivo in os.listdir('.'):
+            if archivo.lower() == nombre_limpio:
+                return archivo
+                
+    # 2. Buscar en la carpeta por si alguna sí entró ahí
+    carpeta = "IMAGENES_VMINGO_PDF"
     if os.path.exists(carpeta):
         for archivo in os.listdir(carpeta):
-            # Compara ignorando mayúsculas y minúsculas
             if archivo.lower() == nombre_limpio:
                 return os.path.join(carpeta, archivo)
     return None
@@ -103,7 +109,7 @@ with tab_pistola:
 with tab_camara:
     st.info("💡 La cámara trasera se activará automáticamente.")
     
-    # Módulo de cámara HTML5 FORZADO a la cámara trasera
+    # Módulo de cámara HTML5 FORZADO (Con Hack para React/Streamlit)
     components.html(
         """
         <div id="reader" style="width:100%; max-width:450px; margin:0 auto; border-radius:10px; overflow:hidden;"></div>
@@ -112,16 +118,36 @@ with tab_camara:
         function onScanSuccess(decodedText, decodedResult) {
             const doc = window.parent.document;
             const inputs = doc.querySelectorAll('input');
-            if(inputs.length > 1) {
-                inputs[1].value = decodedText;
-                inputs[1].dispatchEvent(new Event('change', { bubbles: true }));
+            let targetInput = null;
+            
+            // Buscamos la caja de texto exacta por su fondo
+            for (let i = 0; i < inputs.length; i++) {
+                if (inputs[i].placeholder === "Escriba y presione Enter...") {
+                    targetInput = inputs[i];
+                    break;
+                }
+            }
+            
+            if(targetInput) {
+                // Truco maestro para obligar a React a leer el código
+                let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                nativeInputValueSetter.call(targetInput, decodedText);
+                
+                // Detonamos el Enter automático
+                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                targetInput.dispatchEvent(new Event('change', { bubbles: true }));
+                
+                // Pausar el escáner 3 segundos para no escanear lo mismo 20 veces
+                if (html5QrCode.getState() === 2) {
+                    html5QrCode.pause(true);
+                    setTimeout(() => html5QrCode.resume(), 3000);
+                }
             }
         }
         
         const html5QrCode = new Html5Qrcode("reader");
         const config = { fps: 10, qrbox: {width: 250, height: 150} };
         
-        // Inicia directamente pidiendo la cámara trasera (environment)
         html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
         .catch(err => {
             console.log("Error al iniciar cámara: ", err);
@@ -130,7 +156,6 @@ with tab_camara:
         """, height=350
     )
     
-    # Barra de texto visible debajo de la cámara
     st.text_input("✏️ O escriba el código manualmente aquí:", key="temp_camara", on_change=procesar_camara, placeholder="Escriba y presione Enter...")
 
 st.markdown("<br>", unsafe_allow_html=True)
@@ -198,7 +223,6 @@ if codigo:
                 msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ SIN CAJA (Mandar en Bolsa/Playo)"
                 msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta Nano"
 
-                # Usamos el nuevo motor de búsqueda de imágenes
                 ruta_img = obtener_ruta_imagen(imagen_nombre)
 
                 if ruta_img:
