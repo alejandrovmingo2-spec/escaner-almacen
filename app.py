@@ -5,26 +5,74 @@ import numpy as np
 import os
 
 # ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA
+# 1. CONFIGURACIÓN DE PÁGINA Y ESTILOS CSS
 # ==========================================
-st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial_sidebar_state="collapsed")
+st.set_page_config(page_title="Tablero de Empaque Almacén", layout="centered", initial_sidebar_state="collapsed")
+
+# Inyección de diseño vivo, limpio y profesional (Tarjetas y tipografía)
+st.markdown("""
+<style>
+    .stApp {
+        background-color: #f4f6f9;
+    }
+    .main-title {
+        text-align: center;
+        color: #1e293b;
+        font-weight: 800;
+        font-size: 2.2rem;
+        margin-bottom: 5px;
+    }
+    .sub-title {
+        text-align: center;
+        color: #64748b;
+        font-size: 1rem;
+        margin-bottom: 25px;
+    }
+    .product-title {
+        text-align: center;
+        color: #0f172a;
+        font-size: 2.4rem;
+        font-weight: 700;
+        margin-top: 15px;
+        line-height: 1.2;
+    }
+    .sku-badge {
+        text-align: center;
+        font-family: 'Courier New', monospace;
+        font-size: 1.2rem;
+        background-color: #e2e8f0;
+        color: #334155;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-weight: 600;
+        display: block;
+        margin: 10px auto 25px auto;
+        width: fit-content;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Cabecera de marca: Carga el logo automáticamente si existe en el repositorio
+col_logo_1, col_logo_2, col_logo_3 = st.columns([1, 2, 1])
+with col_logo_2:
+    if os.path.exists("logo.png"):
+        st.image("logo.png", use_container_width=True)
+    else:
+        st.markdown("<h1 class='main-title'>SISTEMA DE EMPAQUE</h1>", unsafe_allow_html=True)
+st.markdown("<p class='sub-title'>Control Logístico de Flujo de Inventario en Nube</p>", unsafe_allow_html=True)
+
 
 # ==========================================
 # 2. CARGA Y LIMPIEZA DE DATOS (NUBE BLINDADA)
 # ==========================================
-@st.cache_data(ttl=30) # Se actualiza cada 30 segundos para máxima velocidad en bodega
+@st.cache_data(ttl=30)
 def cargar_base_maestra():
     url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
     df = pd.read_csv(url_catalogo, dtype=str)
-    
-    # Limpieza absoluta de columnas (Quita BOM y espacios invisibles)
     df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
-    
     for col in df.columns:
         df[col] = df[col].astype(str).str.strip().str.upper()
-        # Elimina decimales flotantes (.0) de códigos numéricos largos
         df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
-        
     return df
 
 def cargar_guias():
@@ -33,7 +81,6 @@ def cargar_guias():
         df = pd.read_csv(url_guias, dtype=str)
         df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
         
-        # Reemplazos ultra limpios para asegurar el correcto relleno (ffill) de pedidos combinados
         df = df.replace(r'^\s*$', np.nan, regex=True)
         df = df.replace(['NAN', 'NONE', 'NULL', 'nan', 'NaN', ''], np.nan)
         
@@ -46,7 +93,6 @@ def cargar_guias():
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
             df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
-            
         return df
     except Exception:
         return pd.DataFrame()
@@ -60,13 +106,12 @@ except Exception as e:
 df_guias = cargar_guias() 
 
 # ==========================================
-# MOTOR DE INVENTARIO DE IMÁGENES (RAÍZ Y CARPETAS)
+# MOTOR DE INVENTARIO DE IMÁGENES (RAÍZ)
 # ==========================================
 @st.cache_data
 def cargar_inventario_imagenes():
     inventario = {}
     rutas_a_escanear = ['.', 'IMAGENES_VMINGO_PDF']
-    
     for raiz in rutas_a_escanear:
         if os.path.exists(raiz):
             for arch in os.listdir(raiz):
@@ -98,10 +143,10 @@ def procesar_camara():
 # ==========================================
 # 4. INTERFAZ DE ENTRADA (PESTAÑAS)
 # ==========================================
-tab_pistola, tab_camara = st.tabs(["🔫 Escáner de Pistola (PC)", "📸 Cámara Automática (Móvil)"])
+tab_pistola, tab_camara = st.tabs(["🔫 Escáner de Pistola / SKU Manual", "📸 Cámara Automática (Móvil)"])
 
 with tab_pistola:
-    st.text_input("ESCANEE LA ETIQUETA AQUÍ:", key="temp_pistola", on_change=procesar_pistola, placeholder="Dispare el láser sobre el código...")
+    st.text_input("ESCANEE CÓDIGO O ESCRIBA EL SKU AQUÍ:", key="temp_pistola", on_change=procesar_pistola, placeholder="Dispare el láser o teclee el SKU...")
     components.html(
         """
         <script>
@@ -115,10 +160,10 @@ with tab_pistola:
     )
 
 with tab_camara:
-    st.info("💡 La cámara trasera se activará automáticamente.")
+    st.info("💡 Usa Google Chrome o Safari para habilitar el lente trasero.")
     components.html(
         """
-        <div id="reader" style="width:100%; max-width:450px; margin:0 auto; border-radius:10px; overflow:hidden;"></div>
+        <div id="reader" style="width:100%; max-width:450px; margin:0 auto; border-radius:12px; overflow:hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15);"></div>
         <script src="https://unpkg.com/html5-qrcode"></script>
         <script>
         function onScanSuccess(decodedText, decodedResult) {
@@ -127,7 +172,7 @@ with tab_camara:
             let targetInput = null;
             
             for (let i = 0; i < inputs.length; i++) {
-                if (inputs[i].placeholder === "Escriba y presione Enter...") {
+                if (inputs[i].placeholder === "Escriba o edite el código...") {
                     targetInput = inputs[i];
                     break;
                 }
@@ -140,37 +185,39 @@ with tab_camara:
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                 targetInput.dispatchEvent(new Event('change', { bubbles: true }));
                 
+                // HACK DE AUTO-ENTER: Quita el foco para forzar el procesamiento instantáneo sin presionar botón
+                targetInput.blur();
+                
                 if (window.html5QrCode && window.html5QrCode.getState() === 2) {
                     window.html5QrCode.pause(true);
-                    setTimeout(() => window.html5QrCode.resume(), 3000);
+                    setTimeout(() => window.html5QrCode.resume(), 2500);
                 }
             }
         }
         
-        // FUNCIÓN DE ARRANQUE SEGURO CON COMPROBACIÓN DE LIBRERÍA
         function inicializarEscaner() {
             if (typeof Html5Qrcode !== "undefined") {
                 window.html5QrCode = new Html5Qrcode("reader");
-                const config = { fps: 15, qrbox: {width: 250, height: 150} };
+                const config = { fps: 15, qrbox: {width: 260, height: 160} };
                 
                 window.html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
                 .catch(err => {
-                    document.getElementById("reader").innerHTML = "<p style='color:red; text-align:center; padding:15px; background:#fff3f3; border-radius:8px;'>⚠️ Error de acceso: " + err + "<br><br>Por favor, asegúrate de permitir el uso de la cámara en los permisos de tu navegador móvil.</p>";
+                    document.getElementById("reader").innerHTML = "<p style='color:#ef4444; font-weight:600; text-align:center; padding:20px; background:#fef2f2; border:1px solid #fee2e2; border-radius:8px;'>⚠️ Cámara no detectada o bloqueada<br><br><span style='font-weight:400; font-size:0.9rem; color:#64748b;'>Si estás en celular, no abras el link dentro de WhatsApp. Cópialo y pégalo directo en la app de Chrome o Safari para activar los permisos.</span></p>";
                 });
             } else {
-                setTimeout(inicializarEscaner, 200); // Reintenta si no ha cargado
+                setTimeout(inicializarEscaner, 200);
             }
         }
         setTimeout(inicializarEscaner, 300);
         </script>
         """, height=360
     )
-    st.text_input("✏️ O escriba el código manualmente aquí:", key="temp_camara", on_change=procesar_camara, placeholder="Escriba y presione Enter...")
+    st.text_input("✏️ Código capturado (o entrada manual):", key="temp_camara", on_change=procesar_camara, placeholder="Escriba o edite el código...")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. LÓGICA DE BÚSQUEDA ROBUSTA
+# 5. LÓGICA DE BÚSQUEDA ROBUSTA (MALLA DE RED)
 # ==========================================
 codigo = st.session_state.codigo_final.strip().upper()
 
@@ -178,13 +225,11 @@ if codigo:
     skus_encontrados = []
     tienda_origen = "Desconocida"
     
-    # A) Búsqueda Flexible en Hojas de Guías
+    # A) Búsqueda en Hojas de Guías Diarias
     if not df_guias.empty:
         columnas_guia = [c for c in df_guias.columns if c != 'SKU']
         for col in columnas_guia:
-            # Primero intenta coincidencia exacta
             coincidencia = df_guias[df_guias[col] == codigo]
-            # Si falla, intenta coincidencia parcial integrada
             if coincidencia.empty:
                 coincidencia = df_guias[df_guias[col].str.contains(codigo, na=False, regex=False)]
                 
@@ -195,7 +240,7 @@ if codigo:
                     tienda_origen = f"Guía Logística ({col})"
                     break
 
-    # B) Búsqueda Directa en el Catálogo Maestro
+    # B) Búsqueda Directa o por SKU Manual en Catálogo Maestro
     if not skus_encontrados:
         if 'CODIGO MELI' in df_maestro.columns:
             match_meli = df_maestro[df_maestro['CODIGO MELI'] == codigo]
@@ -213,29 +258,29 @@ if codigo:
                 skus_encontrados.append(match_fnsku.iloc[0]['SKU'])
                 tienda_origen = "Amazon (FNSKU)"
         
+        # LÓGICA DE ENTRADA DIRECTA POR TECLADO
         if not skus_encontrados and 'SKU' in df_maestro.columns:
             match_sku = df_maestro[df_maestro['SKU'] == codigo]
             if not match_sku.empty:
                 skus_encontrados.append(codigo)
-                tienda_origen = "Búsqueda Directa por SKU"
+                tienda_origen = "Entrada Manual por SKU"
 
     # ==========================================
-    # 6. RENDERIZADO VISUAL DE PRODUCTOS
+    # 6. INTERFAZ VISUAL VÍVIDA DE PRODUCTOS
     # ==========================================
     if skus_encontrados:
         total_productos = len(skus_encontrados)
         
         if total_productos > 1:
-            st.error(f"### 🚨 ¡ATENCIÓN! PEDIDO MÚLTIPLE: {total_productos} PRODUCTOS 🚨", icon="⚠️")
+            st.error(f"### 🚨 ¡ALERTA! PEDIDO COMBINADO CON {total_productos} PRODUCTOS 🚨", icon="⚠️")
             st.markdown("<br>", unsafe_allow_html=True)
             
         for indice, sku_encontrado in enumerate(skus_encontrados):
-            # Limpieza del SKU de búsqueda para cruce perfecto
             sku_limpio = str(sku_encontrado).strip().upper()
             fila_producto = df_maestro[df_maestro['SKU'] == sku_limpio]
             
             if not fila_producto.empty:
-                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto"
+                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto Técnico"
                 variante = fila_producto.iloc[0]['VARIANTE'] if 'VARIANTE' in fila_producto.columns else "-"
                 nombre_chino = fila_producto.iloc[0]['NOMBRE CHINO'] if 'NOMBRE CHINO' in fila_producto.columns else "-"
                 
@@ -243,10 +288,10 @@ if codigo:
                 cinta = fila_producto.iloc[0]['CINTA NANO'] if 'CINTA NANO' in fila_producto.columns else "0"
                 imagen_nombre = fila_producto.iloc[0]['IMAGEN'] if 'IMAGEN' in fila_producto.columns else None
                 
-                msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ SIN CAJA (Mandar en Bolsa/Playo)"
-                msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta Nano"
+                msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ Bolsa / Playo (Sin Caja)"
+                msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta"
 
-                # Extracción desde el inventario unificado de la raíz de GitHub
+                # Llamada al buscador unificado en la raíz
                 ruta_img = None
                 if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
                     clave_busqueda = str(imagen_nombre).strip().lower()
@@ -258,30 +303,31 @@ if codigo:
                         st.image(ruta_img, use_container_width=True)
                 else:
                     if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
-                        st.warning(f"📸 Archivo de imagen '{imagen_nombre}' no encontrado en GitHub.")
+                        st.warning(f"📸 Archivo de imagen '{imagen_nombre}' no indexado en GitHub.")
                 
-                st.markdown(f"<h1 style='text-align: center; margin-bottom: 0px; font-size: 2.5rem;'>{titulo}</h1>", unsafe_allow_html=True)
+                # Renderizado estilizado
+                st.markdown(f"<h1 class='product-title'>{titulo}</h1>", unsafe_allow_html=True)
                 
                 if pd.notna(variante) and str(variante).strip().upper() not in ["-", "NAN", ""]:
-                    st.markdown(f"<h3 style='text-align: center; color: #555; font-weight: 400;'>Variante: <b>{variante}</b></h3>", unsafe_allow_html=True)
+                    st.markdown(f"<h3 style='text-align: center; color: #475569; font-weight: 500;'>Variante: <b>{variante}</b></h3>", unsafe_allow_html=True)
                     
                 if pd.notna(nombre_chino) and str(nombre_chino).strip().upper() not in ["-", "NAN", "SIN NOMBRE CHINO", ""]:
-                    st.markdown(f"<p style='text-align: center; font-family: monospace; color: #999;'>🇨🇳 {nombre_chino}</p>", unsafe_allow_html=True)
+                    st.markdown(f"<p style='text-align: center; font-family: monospace; color: #94a3b8;'>Fábrica: {nombre_chino}</p>", unsafe_allow_html=True)
                 
-                st.markdown(f"<p style='text-align: center; font-family: monospace; font-size: 1.1em; color: #666666; margin-bottom: 25px;'>🏷️ SKU: {sku_limpio}</p>", unsafe_allow_html=True)
+                st.markdown(f"<span class='sku-badge'>SKU: {sku_limpio}</span>", unsafe_allow_html=True)
                 
                 col_izq, col_der = st.columns(2)
                 with col_izq:
-                    st.info(f"**Caja:**\n### {msg_caja}")
+                    st.info(f"**Instrucción de Caja:**\n### {msg_caja}")
                 with col_der:
-                    st.success(f"**Sellado:**\n### {msg_cinta}")
+                    st.success(f"**Proceso de Sellado:**\n### {msg_cinta}")
                 
-                st.markdown(f"<p style='text-align: center; font-size: 0.85rem; color: #ccc; margin-top: 25px;'>Origen: {tienda_origen} | Ref: {codigo}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-size: 0.85rem; color: #94a3b8; margin-top: 25px;'>Origen del Escaneo: {tienda_origen} | Ref: {codigo}</p>", unsafe_allow_html=True)
                 
                 if indice < total_productos - 1:
-                    st.markdown("<hr style='border: 2px dashed #ff4b4b; margin: 50px 0;'>", unsafe_allow_html=True)
+                    st.markdown("<hr style='border: 2px dashed #ef4444; margin: 45px 0;'>", unsafe_allow_html=True)
                 
             else:
-                st.error(f"❌ La guía mapeó al SKU `{sku_limpio}`, pero ese código no existe en tu pestaña de 'Catalogo' en Google Sheets. Revisa la escritura.")
+                st.error(f"❌ Mapeo Exitoso, pero el SKU `{sku_limpio}` no está dado de alta en la pestaña de 'Catalogo' en Google Sheets.")
     else:
-        st.warning(f"No se encontró el código `{codigo}` en las guías ni en el catálogo maestro.")
+        st.warning(f"El código o SKU `{codigo}` no existe en las listas logísticas ni en el catálogo maestro.")
