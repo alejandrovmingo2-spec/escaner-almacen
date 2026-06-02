@@ -10,37 +10,27 @@ import base64
 # ==========================================
 st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial_sidebar_state="collapsed")
 
-# MÓDULO DEL LOGO: Cabecera reducida y Marca de Agua en el fondo
+# MÓDULO DEL LOGO: Marca de Agua directa al fondo
 if os.path.exists("logo.png"):
-    # Logo superior pequeño
-    col_espacio1, col_logo, col_espacio2 = st.columns([3, 1, 3])
-    with col_logo:
-        st.image("logo.png", use_container_width=True)
-        
-    # Inyección de Marca de Agua al fondo absoluto
     with open("logo.png", "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode()
+    
+    # Inyecta la imagen directamente centrada, al fondo y transparente
     st.markdown(
         f"""
-        <style>
-        [data-testid="stAppViewContainer"]::before {{
-            content: "";
-            background-image: url(data:image/png;base64,{encoded_string});
-            background-size: 50%;
-            background-position: center;
-            background-repeat: no-repeat;
-            opacity: 0.03;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: -1;
-            pointer-events: none;
-        }}
-        </style>
+        <img src="data:image/png;base64,{encoded_string}" 
+             style="position: fixed; 
+                    top: 50%; 
+                    left: 50%; 
+                    transform: translate(-50%, -50%); 
+                    width: 60%; 
+                    max-width: 600px; 
+                    opacity: 0.04; 
+                    z-index: -100; 
+                    pointer-events: none;">
         """,
         unsafe_allow_html=True
+    )
     )
     st.markdown("<br>", unsafe_allow_html=True)
 
