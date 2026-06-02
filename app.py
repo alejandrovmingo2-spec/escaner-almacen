@@ -6,36 +6,37 @@ import os
 import base64
 
 # ==========================================
-# 1. CONFIGURACIÓN DE PÁGINA (ESTILO CLÁSICO)
+# 1. CONFIGURACIÓN DE PÁGINA Y MARCA DE AGUA
 # ==========================================
 st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial_sidebar_state="collapsed")
 
 # MÓDULO DEL LOGO: Cabecera reducida y Marca de Agua en el fondo
 if os.path.exists("logo.png"):
-    # 1. Logo superior mucho más pequeño para no robar espacio
+    # Logo superior pequeño
     col_espacio1, col_logo, col_espacio2 = st.columns([3, 1, 3])
     with col_logo:
         st.image("logo.png", use_container_width=True)
         
-    # 2. Inyección de Marca de Agua gigante en el fondo
+    # Inyección de Marca de Agua al fondo absoluto
     with open("logo.png", "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode()
     st.markdown(
         f"""
         <style>
-        .stApp::before {{
+        [data-testid="stAppViewContainer"]::before {{
             content: "";
             background-image: url(data:image/png;base64,{encoded_string});
-            background-size: 60%;
+            background-size: 50%;
             background-position: center;
             background-repeat: no-repeat;
-            opacity: 0.04; /* Nivel de transparencia (4%) para que no estorbe */
+            opacity: 0.03;
             position: fixed;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
             z-index: -1;
+            pointer-events: none;
         }}
         </style>
         """,
@@ -141,10 +142,8 @@ with tab_pistola:
                 inputs[0].focus(); 
             }
         }
-        // Enfoca al cargar la página
         setTimeout(forceFocus, 200);
         
-        // Si el usuario da clic en cualquier parte de la pantalla, devuelve el cursor a la caja de texto
         doc.addEventListener('click', function() {
             forceFocus();
         });
@@ -155,7 +154,7 @@ with tab_pistola:
 with tab_camara:
     st.info("💡 Presione el botón azul para activar el lente e iniciar el escaneo.")
     
-    # Módulo HTML5 con botón manual y Fix para el "Primer Escaneo"
+    # Módulo HTML5 con botón manual y Auto-Enter total
     components.html(
         """
         <div style="text-align: center; margin-bottom: 15px;">
@@ -182,17 +181,19 @@ with tab_camara:
             }
             
             if(targetInput) {
+                // Despierta la caja
+                targetInput.focus();
+                
                 let nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
                 nativeInputValueSetter.call(targetInput, decodedText);
                 
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                 targetInput.dispatchEvent(new Event('change', { bubbles: true }));
                 
-                // FIX: Retraso microscópico + Inyección de tecla Enter para asegurar el primer escaneo
+                // Micro-retraso para simular el auto-enter
                 setTimeout(() => {
-                    targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
                     targetInput.blur();
-                }, 150);
+                }, 100);
                 
                 if (html5QrCode && html5QrCode.getState() === 2) {
                     html5QrCode.pause(true);
