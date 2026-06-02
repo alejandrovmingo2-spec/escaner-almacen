@@ -12,7 +12,7 @@ st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial
 # ==========================================
 # 2. CARGA Y LIMPIEZA DE DATOS (NUBE BLINDADA)
 # ==========================================
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30) # Se actualiza cada 30 segundos para máxima velocidad en bodega
 def cargar_base_maestra():
     url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
     df = pd.read_csv(url_catalogo, dtype=str)
@@ -21,9 +21,8 @@ def cargar_base_maestra():
     df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
     
     for col in df.columns:
-        # Pasa todo a texto, quita espacios extra a los lados y pone en mayúsculas
         df[col] = df[col].astype(str).str.strip().str.upper()
-        # Barredora invencible de decimales (.0)
+        # Elimina decimales flotantes (.0) de códigos numéricos largos
         df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
         
     return df
@@ -34,9 +33,9 @@ def cargar_guias():
         df = pd.read_csv(url_guias, dtype=str)
         df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
         
-        # Elimina cualquier rastro de celdas vacías para que el arrastre funcione
+        # Reemplazos ultra limpios para asegurar el correcto relleno (ffill) de pedidos combinados
         df = df.replace(r'^\s*$', np.nan, regex=True)
-        df = df.replace(['NAN', 'NONE', 'NULL', 'nan', 'NaN'], np.nan)
+        df = df.replace(['NAN', 'NONE', 'NULL', 'nan', 'NaN', ''], np.nan)
         
         columnas_guia = [c for c in df.columns if c != 'SKU']
         if columnas_guia:
@@ -61,7 +60,7 @@ except Exception as e:
 df_guias = cargar_guias() 
 
 # ==========================================
-# MOTOR DE INVENTARIO DE IMÁGENES (EL QUE FALTABA)
+# MOTOR DE INVENTARIO DE IMÁGENES (RAÍZ Y CARPETAS)
 # ==========================================
 @st.cache_data
 def cargar_inventario_imagenes():
@@ -141,60 +140,75 @@ with tab_camara:
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                 targetInput.dispatchEvent(new Event('change', { bubbles: true }));
                 
-                if (html5QrCode.getState() === 2) {
-                    html5QrCode.pause(true);
-                    setTimeout(() => html5QrCode.resume(), 3000);
+                if (window.html5QrCode && window.html5QrCode.getState() === 2) {
+                    window.html5QrCode.pause(true);
+                    setTimeout(() => window.html5QrCode.resume(), 3000);
                 }
             }
         }
         
-        const html5QrCode = new Html5Qrcode("reader");
-        const config = { fps: 10, qrbox: {width: 250, height: 150} };
-        
-        html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
-        .catch(err => {
-            console.log("Error al iniciar cámara: ", err);
-        });
+        // FUNCIÓN DE ARRANQUE SEGURO CON COMPROBACIÓN DE LIBRERÍA
+        function inicializarEscaner() {
+            if (typeof Html5Qrcode !== "undefined") {
+                window.html5QrCode = new Html5Qrcode("reader");
+                const config = { fps: 15, qrbox: {width: 250, height: 150} };
+                
+                window.html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess)
+                .catch(err => {
+                    document.getElementById("reader").innerHTML = "<p style='color:red; text-align:center; padding:15px; background:#fff3f3; border-radius:8px;'>⚠️ Error de acceso: " + err + "<br><br>Por favor, asegúrate de permitir el uso de la cámara en los permisos de tu navegador móvil.</p>";
+                });
+            } else {
+                setTimeout(inicializarEscaner, 200); // Reintenta si no ha cargado
+            }
+        }
+        setTimeout(inicializarEscaner, 300);
         </script>
-        """, height=350
+        """, height=360
     )
     st.text_input("✏️ O escriba el código manualmente aquí:", key="temp_camara", on_change=procesar_camara, placeholder="Escriba y presione Enter...")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. LÓGICA DE BÚSQUEDA EXTREMA
+# 5. LÓGICA DE BÚSQUEDA ROBUSTA
 # ==========================================
-# Limpieza doble al código escaneado para evitar errores de espacios
 codigo = st.session_state.codigo_final.strip().upper()
 
 if codigo:
     skus_encontrados = []
     tienda_origen = "Desconocida"
     
-    # A) Buscar en Guías
+    # A) Búsqueda Flexible en Hojas de Guías
     if not df_guias.empty:
         columnas_guia = [c for c in df_guias.columns if c != 'SKU']
         for col in columnas_guia:
-            # Match exacto en guías
+            # Primero intenta coincidencia exacta
             coincidencia = df_guias[df_guias[col] == codigo]
+            # Si falla, intenta coincidencia parcial integrada
+            if coincidencia.empty:
+                coincidencia = df_guias[df_guias[col].str.contains(codigo, na=False, regex=False)]
+                
             if not coincidencia.empty:
                 if 'SKU' in df_guias.columns:
                     skus_brutos = coincidencia['SKU'].astype(str).str.strip().str.upper().tolist()
                     skus_encontrados = [s for s in skus_brutos if s not in ["NAN", "NONE", ""]]
-                    tienda_origen = "Guía Logística Diaria"
+                    tienda_origen = f"Guía Logística ({col})"
                     break
 
-    # B) Buscar en Catálogo si no hay guía
+    # B) Búsqueda Directa en el Catálogo Maestro
     if not skus_encontrados:
         if 'CODIGO MELI' in df_maestro.columns:
             match_meli = df_maestro[df_maestro['CODIGO MELI'] == codigo]
+            if match_meli.empty:
+                match_meli = df_maestro[df_maestro['CODIGO MELI'].str.contains(codigo, na=False, regex=False)]
             if not match_meli.empty:
                 skus_encontrados.append(match_meli.iloc[0]['SKU'])
                 tienda_origen = "Mercado Libre (Catálogo Directo)"
         
         if not skus_encontrados and 'FNSKU' in df_maestro.columns:
             match_fnsku = df_maestro[df_maestro['FNSKU'] == codigo]
+            if match_fnsku.empty:
+                match_fnsku = df_maestro[df_maestro['FNSKU'].str.contains(codigo, na=False, regex=False)]
             if not match_fnsku.empty:
                 skus_encontrados.append(match_fnsku.iloc[0]['SKU'])
                 tienda_origen = "Amazon (FNSKU)"
@@ -216,10 +230,12 @@ if codigo:
             st.markdown("<br>", unsafe_allow_html=True)
             
         for indice, sku_encontrado in enumerate(skus_encontrados):
-            fila_producto = df_maestro[df_maestro['SKU'] == sku_encontrado]
+            # Limpieza del SKU de búsqueda para cruce perfecto
+            sku_limpio = str(sku_encontrado).strip().upper()
+            fila_producto = df_maestro[df_maestro['SKU'] == sku_limpio]
             
             if not fila_producto.empty:
-                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto sin Título"
+                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto"
                 variante = fila_producto.iloc[0]['VARIANTE'] if 'VARIANTE' in fila_producto.columns else "-"
                 nombre_chino = fila_producto.iloc[0]['NOMBRE CHINO'] if 'NOMBRE CHINO' in fila_producto.columns else "-"
                 
@@ -230,7 +246,7 @@ if codigo:
                 msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ SIN CAJA (Mandar en Bolsa/Playo)"
                 msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta Nano"
 
-                # Ahora el inventario de imágenes sí existe para jalar la foto correcta
+                # Extracción desde el inventario unificado de la raíz de GitHub
                 ruta_img = None
                 if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
                     clave_busqueda = str(imagen_nombre).strip().lower()
@@ -242,7 +258,7 @@ if codigo:
                         st.image(ruta_img, use_container_width=True)
                 else:
                     if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
-                        st.warning(f"📸 Foto no encontrada en el servidor: {imagen_nombre}")
+                        st.warning(f"📸 Archivo de imagen '{imagen_nombre}' no encontrado en GitHub.")
                 
                 st.markdown(f"<h1 style='text-align: center; margin-bottom: 0px; font-size: 2.5rem;'>{titulo}</h1>", unsafe_allow_html=True)
                 
@@ -252,7 +268,7 @@ if codigo:
                 if pd.notna(nombre_chino) and str(nombre_chino).strip().upper() not in ["-", "NAN", "SIN NOMBRE CHINO", ""]:
                     st.markdown(f"<p style='text-align: center; font-family: monospace; color: #999;'>🇨🇳 {nombre_chino}</p>", unsafe_allow_html=True)
                 
-                st.markdown(f"<p style='text-align: center; font-family: monospace; font-size: 1.1em; color: #666666; margin-bottom: 25px;'>🏷️ SKU: {sku_encontrado}</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align: center; font-family: monospace; font-size: 1.1em; color: #666666; margin-bottom: 25px;'>🏷️ SKU: {sku_limpio}</p>", unsafe_allow_html=True)
                 
                 col_izq, col_der = st.columns(2)
                 with col_izq:
@@ -266,6 +282,6 @@ if codigo:
                     st.markdown("<hr style='border: 2px dashed #ff4b4b; margin: 50px 0;'>", unsafe_allow_html=True)
                 
             else:
-                st.error(f"❌ La guía mapeó al SKU `{sku_encontrado}`, pero ese SKU no existe en tu Excel maestro.")
+                st.error(f"❌ La guía mapeó al SKU `{sku_limpio}`, pero ese código no existe en tu pestaña de 'Catalogo' en Google Sheets. Revisa la escritura.")
     else:
-        st.warning(f"No se reconoció el código `{codigo}`. Revise el lector.")
+        st.warning(f"No se encontró el código `{codigo}` en las guías ni en el catálogo maestro.")
