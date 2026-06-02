@@ -31,7 +31,6 @@ if os.path.exists("logo.png"):
         """,
         unsafe_allow_html=True
     )
-    )
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
