@@ -3,17 +3,44 @@ import streamlit.components.v1 as components
 import pandas as pd
 import numpy as np
 import os
+import base64
 
 # ==========================================
 # 1. CONFIGURACIÓN DE PÁGINA (ESTILO CLÁSICO)
 # ==========================================
 st.set_page_config(page_title="Escáner de Almacén", layout="centered", initial_sidebar_state="collapsed")
 
-# MÓDULO DEL LOGO: Se muestra centrado automáticamente si existe en el repositorio
+# MÓDULO DEL LOGO: Cabecera reducida y Marca de Agua en el fondo
 if os.path.exists("logo.png"):
-    col_logo_1, col_logo_2, col_logo_3 = st.columns([1, 2, 1])
-    with col_logo_2:
+    # 1. Logo superior mucho más pequeño para no robar espacio
+    col_espacio1, col_logo, col_espacio2 = st.columns([3, 1, 3])
+    with col_logo:
         st.image("logo.png", use_container_width=True)
+        
+    # 2. Inyección de Marca de Agua gigante en el fondo
+    with open("logo.png", "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode()
+    st.markdown(
+        f"""
+        <style>
+        .stApp::before {{
+            content: "";
+            background-image: url(data:image/png;base64,{encoded_string});
+            background-size: 60%;
+            background-position: center;
+            background-repeat: no-repeat;
+            opacity: 0.04; /* Nivel de transparencia (4%) para que no estorbe */
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
@@ -96,20 +123,31 @@ def procesar_camara():
     st.session_state.temp_camara = ''
 
 # ==========================================
-# 4. INTERFAZ DE ENTRADA (PESTAÑAS TRADICIONALES)
+# 4. INTERFAZ DE ENTRADA (PESTAÑAS)
 # ==========================================
 tab_pistola, tab_camara = st.tabs(["🔫 Escáner de Pistola / SKU Manual", "📸 Cámara de Celular"])
 
 with tab_pistola:
     st.text_input("ESCANEE CÓDIGO O ESCRIBA EL SKU AQUÍ:", key="temp_pistola", on_change=procesar_pistola, placeholder="Dispare el láser o teclee el SKU manualmente...")
+    
+    # IMÁN DE FOCO INFINITO PARA LA COMPUTADORA
     components.html(
         """
         <script>
-        setTimeout(function() {
-            const doc = window.parent.document;
+        const doc = window.parent.document;
+        function forceFocus() {
             const inputs = doc.querySelectorAll('input');
-            if (inputs.length > 0) { inputs[0].focus(); }
-        }, 150); 
+            if (inputs.length > 0) { 
+                inputs[0].focus(); 
+            }
+        }
+        // Enfoca al cargar la página
+        setTimeout(forceFocus, 200);
+        
+        // Si el usuario da clic en cualquier parte de la pantalla, devuelve el cursor a la caja de texto
+        doc.addEventListener('click', function() {
+            forceFocus();
+        });
         </script>
         """, height=0, width=0
     )
@@ -117,7 +155,7 @@ with tab_pistola:
 with tab_camara:
     st.info("💡 Presione el botón azul para activar el lente e iniciar el escaneo.")
     
-    # Módulo HTML5 con botón manual de activación para evitar el bloqueo de cámara
+    # Módulo HTML5 con botón manual y Fix para el "Primer Escaneo"
     components.html(
         """
         <div style="text-align: center; margin-bottom: 15px;">
@@ -150,7 +188,11 @@ with tab_camara:
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                 targetInput.dispatchEvent(new Event('change', { bubbles: true }));
                 
-                targetInput.blur();
+                // FIX: Retraso microscópico + Inyección de tecla Enter para asegurar el primer escaneo
+                setTimeout(() => {
+                    targetInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true }));
+                    targetInput.blur();
+                }, 150);
                 
                 if (html5QrCode && html5QrCode.getState() === 2) {
                     html5QrCode.pause(true);
@@ -181,7 +223,6 @@ with tab_camara:
                     .catch(err => {
                         button.innerText = "❌ Reintentar Conexión";
                         button.style.backgroundColor = "#ef4444";
-                        console.log("Error de cámara: ", err);
                     });
                 }
             }
@@ -243,7 +284,7 @@ if codigo:
                 tienda_origen = "Búsqueda Manual por SKU"
 
     # ==========================================
-    # 6. RENDERIZADO VISUAL ESTÁNDAR (CLÁSICO)
+    # 6. RENDERIZADO VISUAL ESTÁNDAR
     # ==========================================
     if skus_encontrados:
         total_productos = len(skus_encontrados)
