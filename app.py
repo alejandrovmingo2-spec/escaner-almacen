@@ -15,7 +15,7 @@ if os.path.exists("logo.png"):
     with open("logo.png", "rb") as image_file:
         encoded_string = base64.b64encode(image_file.read()).decode()
     
-    # Inyecta la imagen directamente centrada, al fondo y transparente
+    # Z-index en 0 lo pone visible, pointer-events: none evita que bloquee clics
     st.markdown(
         f"""
         <img src="data:image/png;base64,{encoded_string}" 
@@ -23,10 +23,10 @@ if os.path.exists("logo.png"):
                     top: 50%; 
                     left: 50%; 
                     transform: translate(-50%, -50%); 
-                    width: 60%; 
-                    max-width: 600px; 
-                    opacity: 0.04; 
-                    z-index: -100; 
+                    width: 50%; 
+                    max-width: 500px; 
+                    opacity: 0.05; 
+                    z-index: 0; 
                     pointer-events: none;">
         """,
         unsafe_allow_html=True
