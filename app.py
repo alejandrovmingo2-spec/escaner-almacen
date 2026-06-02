@@ -17,12 +17,13 @@ def cargar_base_maestra():
     url_catalogo = "https://docs.google.com/spreadsheets/d/1sFb0ZuO22B0p52GqAPoodUQm1mgcEVb7AffY3jsKHXA/export?format=csv&gid=892257044"
     df = pd.read_csv(url_catalogo, dtype=str)
     
-    # Destruye el caracter fantasma BOM de Google Sheets
+    # Limpieza absoluta de columnas (Quita BOM y espacios invisibles)
     df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
     
     for col in df.columns:
+        # Pasa todo a texto, quita espacios extra a los lados y pone en mayúsculas
         df[col] = df[col].astype(str).str.strip().str.upper()
-        # Armadura str(x) para evitar que celdas nulas (floats) rompan el código
+        # Barredora invencible de decimales (.0)
         df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
         
     return df
@@ -33,7 +34,7 @@ def cargar_guias():
         df = pd.read_csv(url_guias, dtype=str)
         df.columns = df.columns.str.replace('\ufeff', '').str.strip().str.upper()
         
-        # Destruye celdas vacías y la palabra literal 'nan' que arruina el arrastre
+        # Elimina cualquier rastro de celdas vacías para que el arrastre funcione
         df = df.replace(r'^\s*$', np.nan, regex=True)
         df = df.replace(['NAN', 'NONE', 'NULL', 'nan', 'NaN'], np.nan)
         
@@ -45,7 +46,6 @@ def cargar_guias():
         
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
-            # Armadura str(x) también en las guías
             df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
             
         return df
@@ -58,10 +58,28 @@ except Exception as e:
     st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
     st.stop()
 
-df_guias = cargar_guias()
+df_guias = cargar_guias() 
 
 # ==========================================
-# 3. VARIABLES DE ESTADO
+# MOTOR DE INVENTARIO DE IMÁGENES (EL QUE FALTABA)
+# ==========================================
+@st.cache_data
+def cargar_inventario_imagenes():
+    inventario = {}
+    rutas_a_escanear = ['.', 'IMAGENES_VMINGO_PDF']
+    
+    for raiz in rutas_a_escanear:
+        if os.path.exists(raiz):
+            for arch in os.listdir(raiz):
+                if arch.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
+                    ruta_completa = arch if raiz == '.' else os.path.join(raiz, arch)
+                    inventario[arch.lower()] = ruta_completa
+    return inventario
+
+inventario_imagenes = cargar_inventario_imagenes()
+
+# ==========================================
+# 3. VARIABLES DE ESTADO Y PROCESAMIENTO
 # ==========================================
 if 'codigo_final' not in st.session_state:
     st.session_state.codigo_final = ''
@@ -99,7 +117,6 @@ with tab_pistola:
 
 with tab_camara:
     st.info("💡 La cámara trasera se activará automáticamente.")
-    
     components.html(
         """
         <div id="reader" style="width:100%; max-width:450px; margin:0 auto; border-radius:10px; overflow:hidden;"></div>
@@ -141,24 +158,26 @@ with tab_camara:
         </script>
         """, height=350
     )
-    
     st.text_input("✏️ O escriba el código manualmente aquí:", key="temp_camara", on_change=procesar_camara, placeholder="Escriba y presione Enter...")
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
-# 5. LÓGICA DE BÚSQUEDA Y PROCESAMIENTO
+# 5. LÓGICA DE BÚSQUEDA EXTREMA
 # ==========================================
+# Limpieza doble al código escaneado para evitar errores de espacios
 codigo = st.session_state.codigo_final.strip().upper()
 
 if codigo:
     skus_encontrados = []
     tienda_origen = "Desconocida"
     
+    # A) Buscar en Guías
     if not df_guias.empty:
         columnas_guia = [c for c in df_guias.columns if c != 'SKU']
         for col in columnas_guia:
-            coincidencia = df_guias[df_guias[col].str.contains(codigo, na=False, regex=False)]
+            # Match exacto en guías
+            coincidencia = df_guias[df_guias[col] == codigo]
             if not coincidencia.empty:
                 if 'SKU' in df_guias.columns:
                     skus_brutos = coincidencia['SKU'].astype(str).str.strip().str.upper().tolist()
@@ -166,24 +185,25 @@ if codigo:
                     tienda_origen = "Guía Logística Diaria"
                     break
 
+    # B) Buscar en Catálogo si no hay guía
     if not skus_encontrados:
-        match_meli = df_maestro[df_maestro['CODIGO MELI'] == codigo] if 'CODIGO MELI' in df_maestro.columns else df_maestro[df_maestro.get('CODIGO MELI', pd.Series(dtype=str)) == codigo]
-        if not match_meli.empty:
-            skus_encontrados.append(match_meli.iloc[0]['SKU'])
-            tienda_origen = "Mercado Libre (Catálogo Directo)"
-        else:
-            if 'FNSKU' in df_maestro.columns:
-                match_fnsku = df_maestro[df_maestro['FNSKU'] == codigo]
-                if not match_fnsku.empty:
-                    skus_encontrados.append(match_fnsku.iloc[0]['SKU'])
-                    tienda_origen = "Amazon (FNSKU)"
-            
-            if not skus_encontrados:
-                if 'SKU' in df_maestro.columns:
-                    match_sku = df_maestro[df_maestro['SKU'] == codigo]
-                    if not match_sku.empty:
-                        skus_encontrados.append(codigo)
-                        tienda_origen = "Búsqueda Directa por SKU"
+        if 'CODIGO MELI' in df_maestro.columns:
+            match_meli = df_maestro[df_maestro['CODIGO MELI'] == codigo]
+            if not match_meli.empty:
+                skus_encontrados.append(match_meli.iloc[0]['SKU'])
+                tienda_origen = "Mercado Libre (Catálogo Directo)"
+        
+        if not skus_encontrados and 'FNSKU' in df_maestro.columns:
+            match_fnsku = df_maestro[df_maestro['FNSKU'] == codigo]
+            if not match_fnsku.empty:
+                skus_encontrados.append(match_fnsku.iloc[0]['SKU'])
+                tienda_origen = "Amazon (FNSKU)"
+        
+        if not skus_encontrados and 'SKU' in df_maestro.columns:
+            match_sku = df_maestro[df_maestro['SKU'] == codigo]
+            if not match_sku.empty:
+                skus_encontrados.append(codigo)
+                tienda_origen = "Búsqueda Directa por SKU"
 
     # ==========================================
     # 6. RENDERIZADO VISUAL DE PRODUCTOS
@@ -199,7 +219,7 @@ if codigo:
             fila_producto = df_maestro[df_maestro['SKU'] == sku_encontrado]
             
             if not fila_producto.empty:
-                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto"
+                titulo = fila_producto.iloc[0]['TITULO'] if 'TITULO' in fila_producto.columns else "Producto sin Título"
                 variante = fila_producto.iloc[0]['VARIANTE'] if 'VARIANTE' in fila_producto.columns else "-"
                 nombre_chino = fila_producto.iloc[0]['NOMBRE CHINO'] if 'NOMBRE CHINO' in fila_producto.columns else "-"
                 
@@ -210,7 +230,7 @@ if codigo:
                 msg_caja = f"📦 {caja}" if str(caja).upper() not in ["0", "NAN", "SIN CAJA"] else "⚠️ SIN CAJA (Mandar en Bolsa/Playo)"
                 msg_cinta = f"🔒 Lleva Cinta: {cinta}" if str(cinta).upper() not in ["0", "NAN", "SIN CINTA"] else "🚫 No requiere Cinta Nano"
 
-                # Extracción instantánea desde el inventario maestro
+                # Ahora el inventario de imágenes sí existe para jalar la foto correcta
                 ruta_img = None
                 if pd.notna(imagen_nombre) and str(imagen_nombre).strip() != "" and str(imagen_nombre).strip().upper() != "NAN":
                     clave_busqueda = str(imagen_nombre).strip().lower()
