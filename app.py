@@ -22,8 +22,8 @@ def cargar_base_maestra():
     
     for col in df.columns:
         df[col] = df[col].astype(str).str.strip().str.upper()
-        # Destructor seguro de decimales (.0)
-        df[col] = df[col].apply(lambda x: x[:-2] if x.endswith('.0') else x)
+        # Armadura str(x) para evitar que celdas nulas (floats) rompan el código
+        df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
         
     return df
 
@@ -45,7 +45,8 @@ def cargar_guias():
         
         for col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.upper()
-            df[col] = df[col].apply(lambda x: x[:-2] if x.endswith('.0') else x)
+            # Armadura str(x) también en las guías
+            df[col] = df[col].apply(lambda x: str(x)[:-2] if str(x).endswith('.0') else str(x))
             
         return df
     except Exception:
@@ -57,26 +58,7 @@ except Exception as e:
     st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
     st.stop()
 
-df_guias = cargar_guias() 
-
-# ==========================================
-# MOTOR DE INVENTARIO DE IMÁGENES (SÚPER RÁPIDO)
-# ==========================================
-@st.cache_data
-def cargar_inventario_imagenes():
-    inventario = {}
-    # Busca tanto en la raíz de GitHub como en la carpeta
-    rutas_a_escanear = ['.', 'IMAGENES_VMINGO_PDF']
-    
-    for raiz in rutas_a_escanear:
-        if os.path.exists(raiz):
-            for arch in os.listdir(raiz):
-                if arch.lower().endswith(('.png', '.jpg', '.jpeg', '.webp')):
-                    ruta_completa = arch if raiz == '.' else os.path.join(raiz, arch)
-                    inventario[arch.lower()] = ruta_completa
-    return inventario
-
-inventario_imagenes = cargar_inventario_imagenes()
+df_guias = cargar_guias()
 
 # ==========================================
 # 3. VARIABLES DE ESTADO
